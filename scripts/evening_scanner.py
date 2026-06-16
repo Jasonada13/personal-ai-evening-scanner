@@ -143,14 +143,6 @@ def run_evening_scan():
             )
             print(f"  ✓ Signal generated for {ticker}")
 
-
-    # FORCED TEST ALERT - will be reverted immediately after this test run
-    send_discord_signal(
-        "FAKE99",
-        "FAKE INDICATOR (forced via GitHub Action): Dev -8.5% below 20DMA | Vol 2.1x avg | RS vs QQQ +7.2%",
-        "FORCED TEST RUN: This alert is being emitted from the GitHub Action (full pipeline: secret load -> Python execution -> notifier) to verify the Discord webhook integration is working end-to-end. No real market data or BNF scan performed. This is purely a controlled test of the Action + secret + webhook path. Educational only. Ignore this alert for any trading purposes."
-    )
-
     if not signals_found:
         print("  No signals met the BNF criteria this run.")
 
