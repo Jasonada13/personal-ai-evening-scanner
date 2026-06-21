@@ -96,8 +96,11 @@ def send_discord_signal(
         "avatar_url": "https://cdn-icons-png.flaticon.com/512/5968/5968885.png",  # optional
     }
 
-    if PAPER_MODE or not WEBHOOK:
-        print("[notifier] PAPER MODE or no webhook — would have sent:")
+    if not WEBHOOK:
+        # PAPER_MODE controls educational disclaimers and logging only.
+        # If a webhook secret is present we always deliver the alert
+        # (this is the point of the tool for your evening practice).
+        print("[notifier] No webhook — would have sent:")
         print(json.dumps(embed, indent=2))
         log_signal_locally(ticker, reason, rationale)
         return True
