@@ -1,1 +1,45 @@
-# Workflow for evening scans
+name: Evening Reversion Scanner
+
+on:
+  schedule:
+    # Evening US window for UK 9-5 friendly practice (adjust as needed)
+    - cron: '0 22 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  scan-and-alert:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install yfinance requests python-dotenv
+
+      - name: Load Discord webhook (from GitHub Secrets)
+        run: |
+          echo "DISCORD_WEBHOOK_URL=${{ secrets.DISCORD_WEBHOOK_URL }}" >> $GITHUB_ENV
+          echo "PAPER_MODE=true" >> $GITHUB_ENV
+          echo "AI_TECH_UNIVERSE=${{ vars.AI_TECH_UNIVERSE || 'NVDA,AMD,TSLA,PLTR,SMCI,AVGO' }}" >> $GITHUB_ENV
+
+      - name: Run evening educational scan + Discord alerts (with dedicated plan)
+        run: |
+          python scripts/evening_scanner.py 2>&1 | tee scan_output.log
+
+      - name: Upload logs as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: evening-reversion-scan-${{ github.run_number }}
+          path: |
+            scan_output.log
+            signals.jsonl
+          retention-days: 90
