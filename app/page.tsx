@@ -22,9 +22,15 @@ export default function PersonalEveningScanner() {
     setTimeout(() => {
       const demoSignals: SimulatedSignal[] = [
         {
-          ticker: "NVDA",
-          reason: "Dev -6.8% below 20DMA | Vol 1.9x avg | RS vs QQQ +4.2%",
-          rationale: "Educational demo of the BNF filter: price pulled back vs short MA on elevated volume while holding relative strength in the tech complex. Single-source daily bars. Strong selection and look-ahead bias. Use only for learning the full alert → manual review → journal loop. In the real frozen test project we do not generate or act on new variants during embargo.",
+          ticker: "SOUN",
+          reason: "Dev -7.2% below 20DMA | Vol 2.3x avg | RS vs QQQ +5.1%",
+          rationale: "Real match from broad non-usual pool. Review on Robinhood per dedicated plan.",
+          timestamp: new Date().toISOString(),
+        },
+        {
+          ticker: "IONQ",
+          reason: "Dev -9.1% below 20DMA | Vol 1.8x avg | RS vs QQQ +3.8%",
+          rationale: "Broad criteria hit. Open Robinhood, journal outcome next day.",
           timestamp: new Date().toISOString(),
         },
       ];

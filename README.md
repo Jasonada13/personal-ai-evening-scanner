@@ -41,8 +41,9 @@ python scripts/evening_scanner.py
 The `.github/workflows/evening-ai-scan.yml` runs Mon-Fri at 22:00 UTC (≈ 6pm ET).
 
 It:
-- Runs the educational BNF scanner on the AI/tech universe
-- Sends rich Discord embeds when a signal fires ("Check XXX on Robinhood" + rationale + timestamp)
+- Broad BNF scan on large AI/tech pool (not just usual stocks) using efficient batch yf
+- ONLY real notifications (if matches>0): lists exact stocks + reasons + "what to check" + plan details
+- Friction: open Robinhood yourself for the listed ones
 - Uploads logs as artifacts
 - Optionally commits `signals.jsonl` back to the repo (so your Vercel UI can show history)
 

@@ -29,7 +29,9 @@ jobs:
         run: |
           echo "DISCORD_WEBHOOK_URL=${{ secrets.DISCORD_WEBHOOK_URL }}" >> $GITHUB_ENV
           echo "PAPER_MODE=true" >> $GITHUB_ENV
-          echo "AI_TECH_UNIVERSE=${{ vars.AI_TECH_UNIVERSE || 'NVDA,AMD,TSLA,PLTR,SMCI,AVGO' }}" >> $GITHUB_ENV
+          # Broad pool (~40) for max # of non-usual AI/tech stocks that can meet reversion criteria.
+          # See scanner.py for curation (semis + high-beta emerging). Override via repo var.
+          echo "AI_TECH_UNIVERSE=${{ vars.AI_TECH_UNIVERSE || 'NVDA,AVGO,MU,AMD,TSM,ASML,LRCX,AMAT,KLAC,PLTR,SNOW,CRWD,DDOG,NET,ZS,ARM,SOUN,UPST,IONQ,ASTS,RKLB,PATH,CRSP,MSFT,GOOGL,META,AMZN,AAPL,ORCL,IBM,PANW,NOW,CRM,INTU,SHOP,SQ,PYPL,COIN,MSTR,SMCI' }}" >> $GITHUB_ENV
 
       - name: Run evening educational scan + Discord alerts (with dedicated plan)
         run: |

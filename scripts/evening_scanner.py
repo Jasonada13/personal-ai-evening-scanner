@@ -25,11 +25,15 @@ except Exception:
 import yfinance as yf
 
 PAPER_MODE = os.getenv("PAPER_MODE", "true").lower() in ("true", "1", "yes")
+# Broad curated pool for max qualifying coverage (AI/tech with volatility for reversion, 
+# not just usual megacaps). Override via GH var or edit. ~40-50 to keep GH Action fast.
+# Includes Semis + software/AI + high-beta/emerging (inspired by main project layer lists).
 UNIVERSE = [x.strip().upper() for x in os.getenv(
-    "AI_TECH_UNIVERSE", "NVDA,AMD,TSLA,PLTR,SMCI,AVGO"
+    "AI_TECH_UNIVERSE", 
+    "NVDA,AVGO,MU,AMD,TSM,ASML,LRCX,AMAT,KLAC,PLTR,SNOW,CRWD,DDOG,NET,ZS,ARM,SOUN,UPST,IONQ,ASTS,RKLB,PATH,CRSP,MSFT,GOOGL,META,AMZN,AAPL,ORCL,IBM,PANW,NOW,CRM,INTU,SHOP,SQ,PYPL,COIN,MSTR,SMCI"
 ).split(",") if x.strip()]
 
-def compute_bnf_signal(ticker: str) -> Optional[Dict]:
+def compute_bnf_signal(ticker: str, hist_multi=None) -> Optional[Dict]:
     """
     Basic Naive Filter (BNF-style) — educational example only.
 
@@ -39,26 +43,28 @@ def compute_bnf_signal(ticker: str) -> Optional[Dict]:
     3. Positive relative strength vs QQQ.
     """
     try:
-        hist = yf.download(
-            ticker,
-            period="60d",
-            progress=False,
-            auto_adjust=True,
-            threads=False,
-        )
-        if hist.empty or len(hist) < 25:
+        if hist_multi is not None and ticker in getattr(hist_multi.get("Close"), "columns", []):
+            close = hist_multi["Close"][ticker]
+            vol = hist_multi["Volume"][ticker]
+        else:
+            hist = yf.download(ticker, period="60d", progress=False, auto_adjust=True, threads=False)
+            if hist.empty or len(hist) < 25:
+                return None
+            close = hist["Close"]
+            vol = hist["Volume"]
+
+        if len(close) < 25:
             return None
 
-        # Fixed pandas access
-        close = hist["Close"]
-        price = float(close.iloc[-1].item())
-        ma20 = float(close.tail(20).mean().item())
+        price = float(getattr(close.iloc[-1], "item", lambda: close.iloc[-1])())
+        ma20 = float(getattr(close.tail(20).mean(), "item", lambda: close.tail(20).mean())())
         dev_pct = (price - ma20) / ma20 * 100.0
 
-        vol_today = float(hist["Volume"].iloc[-1].item())
-        avg_vol = float(hist["Volume"].tail(20).mean().item() or 1)
-        vol_mult = vol_today / avg_vol
+        vol_today = float(getattr(vol.iloc[-1], "item", lambda: vol.iloc[-1])())
+        avg_vol = float(getattr(vol.tail(20).mean(), "item", lambda: vol.tail(20).mean() or 1)())
+        vol_mult = vol_today / avg_vol if avg_vol else 0
 
+        # QQQ still per for simplicity (small)
         qqq = yf.download("QQQ", period="60d", progress=False, auto_adjust=True, threads=False)
         if not qqq.empty and len(qqq) >= 20:
             q_close = qqq["Close"]
@@ -87,7 +93,7 @@ def compute_bnf_signal(ticker: str) -> Optional[Dict]:
                 "4. Track outcome in 24-48h and log in your dedicated plan tracker. "
                 "This is for consistent evening practice only. "
                 "Aligns with your single dedicated plan for disciplined review and journaling. "
-                "In-sample only — not for the main frozen test."
+                "Broad pool used to find non-usual stocks meeting criteria. In-sample only."
             )
             return {
                 "ticker": ticker,
@@ -100,39 +106,38 @@ def compute_bnf_signal(ticker: str) -> Optional[Dict]:
 
 def run_evening_scan():
     print(f"\n[evening_scanner] Starting Full Evening Reversion Scanner — {datetime.now(timezone.utc).isoformat()}")
-    print(f"Universe: {UNIVERSE}")
+    print(f"Universe size: {len(UNIVERSE)} (broad pool for non-usual coverage)")
     print(f"PAPER_MODE={PAPER_MODE}\n")
 
     signals_found = []
 
+    # Efficient batch download (yfinance supports multi for speed on larger pools)
+    try:
+        multi = " ".join(UNIVERSE)
+        hist_multi = yf.download(multi, period="60d", progress=False, auto_adjust=True, threads=True)
+    except Exception as e:
+        print(f"[scanner] batch download error: {e}")
+        hist_multi = None
+
     for ticker in UNIVERSE:
-        sig = compute_bnf_signal(ticker)
+        sig = compute_bnf_signal(ticker, hist_multi=hist_multi)  # pass for potential reuse
         if sig:
             signals_found.append(sig)
-            send_discord_signal(
-                sig["ticker"],
-                sig["reason"],
-                sig["rationale"],
-            )
             print(f"  ✓ Signal generated for {ticker}")
 
-    # Always send a dedicated plan test alert for the evening window to ensure full alert is delivered
-    # (educational, labeled as such)
-    send_discord_signal(
-        "EVENING",
-        "Full alert test for dedicated plan: Evening Reversion practice window active",
-        "This is the full alert with Robinhood instruction. "
-        "Dedicated Plan Details: Follow your single dedicated plan every evening — "
-        "scan for reversion setups on AI/tech names, open Robinhood to review the specific ticker, "
-        "apply your personal risk rules and journal template, record the outcome the next day. "
-        "Use this for consistent practice. Paper/educational only. "
-        "No auto orders. Friction-first: you must manually review and decide."
-    )
-    print("  ✓ Full dedicated plan alert sent for evening review practice")
+    # ONLY real notifications: send if matches (batched for list of stocks)
+    if signals_found:
+        try:
+            send_discord_signals(signals_found)
+        except NameError:
+            # fallback if not updated notifier yet
+            for s in signals_found:
+                send_discord_signal(s["ticker"], s["reason"], s["rationale"])
+        print(f"  ✓ Full alert sent for {len(signals_found)} stocks + dedicated plan details")
+    else:
+        print("  No real BNF signals met criteria this run — no notification sent (only real checks).")
 
-    if not signals_found:
-        print("  No real BNF signals met criteria this run (expected — data dependent).")
-    print("\n[evening_scanner] Scan complete. Check Discord for the full alert with plan details.")
+    print("\n[evening_scanner] Scan complete. Only real criteria matches trigger Discord (with exact stocks + what to check).")
     return signals_found
 
 if __name__ == "__main__":

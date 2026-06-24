@@ -68,7 +68,7 @@ def send_discord_signal(
     rationale: str,
     action_text: Optional[str] = None,
 ) -> bool:
-    """Send rich embed to Discord. Returns success."""
+    """Send rich embed to Discord. Returns success. Single ticker."""
     if not action_text:
         action_text = f"Open the Robinhood app (or robinhood.com/stocks/{ticker}) → search {ticker} → review the chart, volume, and any news yourself. This is an educational alert only."
 
@@ -114,6 +114,67 @@ def send_discord_signal(
     except Exception as e:
         print(f"[notifier] Discord send failed: {e}")
         log_signal_locally(ticker, reason, rationale)  # still log locally
+        return False
+
+def send_discord_signals(signals: list[Dict]) -> bool:
+    """Batch version: list specific stocks + reasons in one or few messages.
+    Only call when len>0 for real notifications.
+    Includes shared dedicated plan reminder."""
+    if not signals:
+        return False
+    if len(signals) == 1:
+        s = signals[0]
+        return send_discord_signal(s["ticker"], s["reason"], s["rationale"])
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    # Build one summary embed listing them (for "as many as possible" without spam)
+    lines = []
+    for s in signals[:6]:  # cap to avoid too long
+        lines.append(f"{s['ticker']}: {s['reason']}")
+    desc = "**Check these on Robinhood:**\n" + "\n".join(lines)
+    if len(signals) > 6:
+        desc += f"\n(+{len(signals)-6} more; see full in signals.jsonl)"
+
+    shared_rationale = (
+        "Multiple stocks met BNF criteria this evening window. "
+        "Dedicated Plan Details: Follow your single dedicated plan — "
+        "for each ticker: open Robinhood, review chart/volume/news vs rules, "
+        "journal rationale+outcome next day. Friction-first: manually decide. "
+        "Paper/educational only. Broad pool used to surface non-usual names meeting criteria."
+    )
+
+    embed = {
+        "title": f"📈 US AI/Tech Evening Window — {len(signals)} Real Matches",
+        "description": desc,
+        "color": 0x3b82f6,
+        "fields": [
+            {"name": "Rationale / Dedicated Plan", "value": shared_rationale[:1000], "inline": False},
+            {"name": "Generated", "value": timestamp, "inline": True},
+            {"name": "Mode", "value": "PAPER / EDUCATIONAL • No auto orders • 1% risk discipline recommended", "inline": True},
+        ],
+        "footer": {"text": "Personal learning scanner • Friction > automation • Review outcome tomorrow"}
+    }
+
+    payload = {"embeds": [embed], "username": "Evening Scanner", "avatar_url": "https://cdn-icons-png.flaticon.com/512/5968/5968885.png"}
+
+    if not WEBHOOK:
+        print("[notifier] No webhook — would have sent batch:")
+        print(json.dumps(embed, indent=2))
+        for s in signals:
+            log_signal_locally(s["ticker"], s["reason"], s["rationale"])
+        return True
+
+    try:
+        resp = requests.post(WEBHOOK, json=payload, timeout=20)
+        resp.raise_for_status()
+        for s in signals:
+            log_signal_locally(s["ticker"], s["reason"], s["rationale"])
+        print(f"[notifier] Discord batch alert sent for {len(signals)} stocks")
+        return True
+    except Exception as e:
+        print(f"[notifier] Discord batch failed: {e}")
+        for s in signals:
+            log_signal_locally(s["ticker"], s["reason"], s["rationale"])
         return False
 
 if __name__ == "__main__":
