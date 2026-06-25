@@ -8,7 +8,7 @@ It lives in its own GitHub repository and has **nothing to do** with the frozen 
 
 - Practice building a small, focused, friction-first alert system for the US evening window (power hour / close / after-hours) — convenient if you trade from the UK on a 9-5 schedule.
 - Learn clean modular code: notifier (Discord) + scanner (simple rules) + scheduled execution (GitHub Actions) + a nice UI (Next.js on Vercel).
-- Reinforce good habits: timestamped rationales at decision time, "open the broker yourself", paper mode by default, local + remote logging for later review, small universe.
+- Reinforce good habits: timestamped rationales at decision time, "open the broker yourself", paper mode by default, local + remote logging for later review, **large universe (~150 tickers) for statistical power on BNF trades**.
 - The "BNF" (basic naive filter) here is deliberately naive and overfit-prone so you can experience the full loop of idea → alert → manual review → journal outcome.
 
 **Strong safety rules in this project:**
@@ -75,7 +75,7 @@ personal-ai-evening-scanner/
 │   └── page.tsx            # Main dashboard + simulator
 ├── scripts/
 │   ├── notifier.py         # Discord rich embeds + local logging (modular)
-│   └── evening_scanner.py  # Educational BNF filter (MA dev + vol + RS vs QQQ)
+│   └── evening_scanner.py  # Educational BNF filter on large ~150 ticker pool + liquidity pre-filter + chunked yf
 ├── .github/workflows/
 │   └── evening-ai-scan.yml # Scheduled + manual runs (the agent loop)
 ├── .env.example

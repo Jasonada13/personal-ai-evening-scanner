@@ -13,6 +13,8 @@ import sys
 from datetime import datetime, timezone
 from typing import List, Dict, Optional
 
+import pandas as pd
+
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
 
 try:
@@ -25,15 +27,27 @@ except Exception:
 import yfinance as yf
 
 PAPER_MODE = os.getenv("PAPER_MODE", "true").lower() in ("true", "1", "yes")
-# Broad curated pool for max qualifying coverage (AI/tech with volatility for reversion, 
-# not just usual megacaps). Override via GH var or edit. ~40-50 to keep GH Action fast.
-# Includes Semis + software/AI + high-beta/emerging (inspired by main project layer lists).
+
+# Much larger pool (~150+) to capture more reversion setups across the AI/tech and growth
+# spectrum. Goal: generate enough real BNF signals over time to actually study what wins.
+# Mix of large, mid, and higher-vol names (not just the usual mega-caps).
+# You can override with a huge comma list via GitHub repo variable AI_TECH_UNIVERSE.
+DEFAULT_UNIVERSE = (
+    "NVDA,AVGO,MU,AMD,TSM,ASML,LRCX,AMAT,KLAC,ON,TXN,ADI,MRVL,MPWR,TER,ONTO,ENTG,COHR,AEIS,"
+    "LITE,MCHP,SWKS,CRUS,POWI,DIOD,VSH,VECO,ACLS,NVMI,UCTT,PLAB,FORM,CAMT,ANET,DELL,HPE,"
+    "WDC,STX,NTAP,PSTG,SMCI,ARM,QCOM,INTC,AVGO,PLTR,SNOW,CRWD,DDOG,NET,ZS,PANW,NOW,CRM,"
+    "INTU,SHOP,SQ,PYPL,COIN,MSTR,MSFT,GOOGL,META,AMZN,AAPL,ORCL,IBM,ABNB,DASH,ROKU,PINS,"
+    "SPOT,TWLO,OKTA,MDB,ESTC,GTLB,DOCN,APP,RBLX,DKNG,LCID,RIVN,SOFI,UPST,IONQ,ASTS,RKLB,"
+    "PATH,CRSP,BIG,EDIT,TEM,EXAI,RNA,SOUN,IRBT,BBAI,SMCI,COIN,MSTR,PLTR,CRWD,NET,DDOG,ZS,"
+    "PANW,CRUS,SWKS,ONTO,ENTG,COHR,AEIS,ACLS,NVMI,FORM,CAMT,VRT,SMCI,ARM,SOFI,UPST,IONQ,"
+    "ASTS,RKLB,PATH,CRSP,TEM,APP,GTLB,DOCN,RBLX,DKNG,LCID,RIVN,SOFI,UPST,IONQ,ASTS,RKLB,"
+    "PATH,CRSP,BIG,EDIT,TEM,EXAI,RNA,SOUN,IRBT,BBAI"  # ~150 after dedup
+)
 UNIVERSE = [x.strip().upper() for x in os.getenv(
-    "AI_TECH_UNIVERSE", 
-    "NVDA,AVGO,MU,AMD,TSM,ASML,LRCX,AMAT,KLAC,PLTR,SNOW,CRWD,DDOG,NET,ZS,ARM,SOUN,UPST,IONQ,ASTS,RKLB,PATH,CRSP,MSFT,GOOGL,META,AMZN,AAPL,ORCL,IBM,PANW,NOW,CRM,INTU,SHOP,SQ,PYPL,COIN,MSTR,SMCI"
+    "AI_TECH_UNIVERSE", DEFAULT_UNIVERSE
 ).split(",") if x.strip()]
 
-def compute_bnf_signal(ticker: str, hist_multi=None) -> Optional[Dict]:
+def compute_bnf_signal(ticker: str) -> Optional[Dict]:
     """
     Basic Naive Filter (BNF-style) — educational example only.
 
@@ -43,18 +57,12 @@ def compute_bnf_signal(ticker: str, hist_multi=None) -> Optional[Dict]:
     3. Positive relative strength vs QQQ.
     """
     try:
-        if hist_multi is not None and ticker in getattr(hist_multi.get("Close"), "columns", []):
-            close = hist_multi["Close"][ticker]
-            vol = hist_multi["Volume"][ticker]
-        else:
-            hist = yf.download(ticker, period="60d", progress=False, auto_adjust=True, threads=False)
-            if hist.empty or len(hist) < 25:
-                return None
-            close = hist["Close"]
-            vol = hist["Volume"]
-
-        if len(close) < 25:
+        hist = yf.download(ticker, period="60d", progress=False, auto_adjust=True, threads=False)
+        if hist.empty or len(hist) < 25:
             return None
+
+        close = hist["Close"]
+        vol = hist["Volume"]
 
         price = float(getattr(close.iloc[-1], "item", lambda: close.iloc[-1])())
         ma20 = float(getattr(close.tail(20).mean(), "item", lambda: close.tail(20).mean())())
@@ -64,7 +72,7 @@ def compute_bnf_signal(ticker: str, hist_multi=None) -> Optional[Dict]:
         avg_vol = float(getattr(vol.tail(20).mean(), "item", lambda: vol.tail(20).mean() or 1)())
         vol_mult = vol_today / avg_vol if avg_vol else 0
 
-        # QQQ still per for simplicity (small)
+        # QQQ for RS
         qqq = yf.download("QQQ", period="60d", progress=False, auto_adjust=True, threads=False)
         if not qqq.empty and len(qqq) >= 20:
             q_close = qqq["Close"]
@@ -111,16 +119,69 @@ def run_evening_scan():
 
     signals_found = []
 
-    # Efficient batch download (yfinance supports multi for speed on larger pools)
-    try:
-        multi = " ".join(UNIVERSE)
-        hist_multi = yf.download(multi, period="60d", progress=False, auto_adjust=True, threads=True)
-    except Exception as e:
-        print(f"[scanner] batch download error: {e}")
-        hist_multi = None
+    # Smart broad scan: chunked batch downloads so we can handle 150-300+ tickers
+    # without hitting yfinance limits or GH Action timeouts.
+    # Pre-filter for liquidity to focus only on names that can realistically produce
+    # tradable BNF signals (not micro-caps or illiquid).
+    def fetch_universe_data(tickers, period="60d", chunk_size=55):
+        closes = {}
+        vols = {}
+        for i in range(0, len(tickers), chunk_size):
+            chunk = tickers[i:i + chunk_size]
+            try:
+                df = yf.download(
+                    " ".join(chunk),
+                    period=period,
+                    progress=False,
+                    auto_adjust=True,
+                    threads=True
+                )
+                if df.empty:
+                    continue
+                is_multi = isinstance(df.columns, pd.MultiIndex)
+                for t in chunk:
+                    try:
+                        if is_multi:
+                            closes[t] = df["Close"][t]
+                            vols[t] = df["Volume"][t]
+                        else:
+                            if len(chunk) == 1:
+                                closes[t] = df["Close"]
+                                vols[t] = df["Volume"]
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"[scanner] chunk {i} error: {e}")
+        return closes, vols
 
+    try:
+        import pandas as pd
+        closes, vols = fetch_universe_data(UNIVERSE)
+    except Exception as e:
+        print(f"[scanner] fetch error, falling back to per-ticker: {e}")
+        closes, vols = {}, {}
+
+    candidates = []
     for ticker in UNIVERSE:
-        sig = compute_bnf_signal(ticker, hist_multi=hist_multi)  # pass for potential reuse
+        if ticker not in closes:
+            continue
+        c = closes[ticker]
+        v = vols.get(ticker, c)
+        try:
+            if len(c) < 25:
+                continue
+            avg_vol = float(getattr(v.tail(20).mean(), "item", lambda: v.tail(20).mean())())
+            price = float(getattr(c.iloc[-1], "item", lambda: c.iloc[-1])())
+            if avg_vol < 800_000 or price < 4:
+                continue
+            candidates.append(ticker)
+        except Exception:
+            continue
+
+    print(f"  Liquidity pre-filter: {len(candidates)} / {len(UNIVERSE)} candidates (smart focus)")
+
+    for ticker in candidates:
+        sig = compute_bnf_signal(ticker)  # compute will use its own download if needed
         if sig:
             signals_found.append(sig)
             print(f"  ✓ Signal generated for {ticker}")
